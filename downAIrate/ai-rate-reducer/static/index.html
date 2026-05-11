@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>论文 AI 率降低工具</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <h1>论文 AI 率降低工具</h1>
+    <p class="subtitle">本地运行 · 只改正文 · 保留原格式</p>
+
+    <div id="drop-zone" class="drop-zone">
+      <p>把 <code>.docx</code> 文件拖到这里</p>
+      <p>或</p>
+      <button type="button" id="pick-btn">选择文件</button>
+      <input type="file" id="file-input" accept=".docx" hidden>
+      <p id="file-name" class="file-name"></p>
+    </div>
+
+    <button type="button" id="start-btn" disabled>开始改写</button>
+
+    <div id="progress" class="hidden">
+      <p id="progress-text">准备中...</p>
+      <div class="bar"><div id="bar-fill"></div></div>
+    </div>
+
+    <div id="result" class="hidden">
+      <h2>✓ 完成</h2>
+      <p id="download-line"></p>
+      <pre id="report"></pre>
+    </div>
+
+    <div id="error" class="hidden error"></div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
