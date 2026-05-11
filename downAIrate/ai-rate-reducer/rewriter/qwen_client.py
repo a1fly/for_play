@@ -93,4 +93,20 @@ def _validate(original: str, response: str) -> RewriteResult:
 
 
 def _default_qwen_call(system: str, user: str) -> str:
-    raise NotImplementedError("dashscope adapter not wired yet")
+    """Call dashscope's Qwen Generation API and return the text content."""
+    import dashscope  # local import: keeps tests independent of SDK import
+
+    response = dashscope.Generation.call(
+        model="qwen-plus",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.9,
+        top_p=0.95,
+        result_format="message",
+    )
+    if response.status_code != 200:
+        msg = getattr(response, "message", "unknown error")
+        raise RuntimeError(f"Qwen API returned {response.status_code}: {msg}")
+    return response.output.choices[0].message.content

@@ -69,3 +69,62 @@ def test_reject_low_chinese_ratio():
     result = rewrite_paragraph(original, qwen_call=lambda s, u: response)
     assert result.success is False
     assert result.reject_reason == "low_chinese"
+
+
+def test_default_qwen_call_extracts_text(monkeypatch):
+    from rewriter import qwen_client
+
+    class FakeMessage:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeChoice:
+        def __init__(self, content):
+            self.message = FakeMessage(content)
+
+    class FakeOutput:
+        def __init__(self, content):
+            self.choices = [FakeChoice(content)]
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, content):
+            self.output = FakeOutput(content)
+
+    captured = {}
+
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        return FakeResponse("改写后的文本")
+
+    import dashscope
+    monkeypatch.setattr(dashscope.Generation, "call", fake_call)
+
+    out = qwen_client._default_qwen_call("sys prompt", "user prompt")
+    assert out == "改写后的文本"
+    assert captured["model"] == "qwen-plus"
+    assert captured["temperature"] == 0.9
+    assert captured["top_p"] == 0.95
+    msgs = captured["messages"]
+    assert msgs[0]["role"] == "system"
+    assert msgs[0]["content"] == "sys prompt"
+    assert msgs[1]["role"] == "user"
+    assert msgs[1]["content"] == "user prompt"
+
+
+def test_default_qwen_call_raises_on_error(monkeypatch):
+    from rewriter import qwen_client
+
+    class FakeResponse:
+        status_code = 429
+        message = "rate limited"
+
+    import dashscope
+    monkeypatch.setattr(
+        dashscope.Generation, "call", lambda **kw: FakeResponse()
+    )
+
+    import pytest
+    with pytest.raises(RuntimeError, match="429"):
+        qwen_client._default_qwen_call("s", "u")
