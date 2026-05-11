@@ -46,8 +46,50 @@ def rewrite_paragraph(
     return RewriteResult(success=False, reject_reason="api_error", error_message=last_error)
 
 
+def _chinese_count(text: str) -> int:
+    return sum(1 for ch in text if "一" <= ch <= "鿿")
+
+
+def _digit_token_count(text: str) -> int:
+    """Count distinct digit runs (e.g. '2024' is one token, '95.3' is one)."""
+    return len(re.findall(r"\d+(?:\.\d+)?", text))
+
+
+def _citation_count(text: str) -> int:
+    return len(re.findall(r"\[\d+\]", text))
+
+
+REFUSAL_PREFIXES = ("抱歉", "我无法", "以下是", "改写如下", "好的", "当然")
+
+
 def _validate(original: str, response: str) -> RewriteResult:
-    return RewriteResult(success=True, text=response)
+    text = (response or "").strip()
+
+    if not text:
+        return RewriteResult(success=False, reject_reason="empty")
+
+    if any(text.startswith(p) for p in REFUSAL_PREFIXES):
+        return RewriteResult(success=False, reject_reason="refusal_prefix")
+
+    orig_cn = _chinese_count(original) / max(len(original), 1)
+    new_cn = _chinese_count(text) / max(len(text), 1)
+    if orig_cn - new_cn > 0.30:
+        return RewriteResult(success=False, reject_reason="low_chinese")
+
+    orig_len = len(original)
+    new_len = len(text)
+    if orig_len > 0:
+        ratio = new_len / orig_len
+        if ratio < 0.6 or ratio > 1.4:
+            return RewriteResult(success=False, reject_reason="length_drift")
+
+    if _citation_count(original) != _citation_count(text):
+        return RewriteResult(success=False, reject_reason="citation_count_changed")
+
+    if _digit_token_count(original) - _digit_token_count(text) > 2:
+        return RewriteResult(success=False, reject_reason="digits_dropped")
+
+    return RewriteResult(success=True, text=text)
 
 
 def _default_qwen_call(system: str, user: str) -> str:
