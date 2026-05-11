@@ -40,6 +40,32 @@ def _has_math_or_object(paragraph) -> bool:
     return "<m:oMath" in xml or "<w:object" in xml
 
 
+def _has_mixed_format(paragraph) -> bool:
+    """True if paragraph has 2+ runs whose key formatting attributes differ.
+
+    Checked attrs: bold, italic, underline, font.name, font.size,
+    font.color.rgb. Empty runs (no text) are ignored.
+    """
+    runs = [r for r in paragraph.runs if r.text]
+    if len(runs) < 2:
+        return False
+
+    def fingerprint(run):
+        font = run.font
+        color = font.color.rgb if font.color and font.color.rgb else None
+        return (
+            run.bold,
+            run.italic,
+            run.underline,
+            font.name,
+            font.size,
+            color,
+        )
+
+    first = fingerprint(runs[0])
+    return any(fingerprint(r) != first for r in runs[1:])
+
+
 class Classifier:
     """Stateful paragraph classifier.
 
@@ -103,5 +129,13 @@ class Classifier:
         # Standalone [N] reference (rare — usually inside references zone)
         if re.match(r"^\[\d+\]", text):
             return Classification(rewrite=False, skip_reason="reference_entry")
+
+        # Rule 9: too short
+        if len(text) < 15:
+            return Classification(rewrite=False, skip_reason="too_short")
+
+        # Rule 8: mixed format
+        if _has_mixed_format(paragraph):
+            return Classification(rewrite=False, skip_reason="mixed_format")
 
         return Classification(rewrite=True)

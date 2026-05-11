@@ -67,3 +67,36 @@ def test_pure_english_paragraph_is_skipped(sample_docx):
             assert result.skip_reason in ("no_chinese", "low_chinese_ratio")
             return
     raise AssertionError("pure English paragraph not found")
+
+
+def test_too_short_paragraph_is_skipped(sample_docx):
+    doc = Document(str(sample_docx))
+    classifier = Classifier()
+    for p in doc.paragraphs:
+        if p.text == "如下所示。":
+            result = classifier.classify(p)
+            assert result == Classification(rewrite=False, skip_reason="too_short")
+            return
+    raise AssertionError("short paragraph not found")
+
+
+def test_mixed_format_paragraph_is_skipped(sample_docx):
+    doc = Document(str(sample_docx))
+    classifier = Classifier()
+    for p in doc.paragraphs:
+        if "混合格式段落" in p.text:
+            result = classifier.classify(p)
+            assert result == Classification(rewrite=False, skip_reason="mixed_format")
+            return
+    raise AssertionError("mixed-format paragraph not found")
+
+
+def test_normal_body_paragraph_is_rewritten(sample_docx):
+    doc = Document(str(sample_docx))
+    classifier = Classifier()
+    for p in doc.paragraphs:
+        if "近年来人工智能" in p.text:
+            result = classifier.classify(p)
+            assert result == Classification(rewrite=True, skip_reason=None)
+            return
+    raise AssertionError("normal body paragraph not found")
