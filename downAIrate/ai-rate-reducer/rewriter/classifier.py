@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import Literal
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 SkipReason = Literal[
     "heading",
     "special_style",
@@ -88,8 +92,12 @@ class Classifier:
         heading_keywords = ["heading", "title", "toc", "标题", "目录"]
         is_heading = any(kw in style_name for kw in heading_keywords)
         if is_heading:
-            if any(kw in text for kw in ["参考文献", "References", "Bibliography"]):
+            if any(kw in text for kw in ["参考文献", "References", "Bibliography"]) and not self._in_references_zone:
                 self._in_references_zone = True
+                logger.info(
+                    "references-zone trigger: heading=%r (all following paragraphs will be skipped)",
+                    text[:80],
+                )
             return Classification(rewrite=False, skip_reason="heading")
 
         # If already in references zone, everything is skipped.

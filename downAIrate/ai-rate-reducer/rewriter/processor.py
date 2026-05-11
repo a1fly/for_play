@@ -8,6 +8,11 @@ from docx import Document
 from .classifier import Classifier, Classification
 from .llm_client import rewrite_paragraph, RewriteResult, LLMCallable
 
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ProcessReport:
@@ -28,10 +33,21 @@ def process_document(
     progress: ProgressCallback | None = None,
 ) -> ProcessReport:
     doc = Document(str(input_path))
+    start_time = time.time()
+    logger.info("processing %s", input_path.name)
     paragraphs = doc.paragraphs
 
     classifier = Classifier()
     classifications = [classifier.classify(p) for p in paragraphs]
+    skip_counts: dict[str, int] = {}
+    for c in classifications:
+        if not c.rewrite:
+            skip_counts[c.skip_reason or "unknown"] = skip_counts.get(c.skip_reason or "unknown", 0) + 1
+    rewrite_count = sum(1 for c in classifications if c.rewrite)
+    logger.info(
+        "classification: total=%d rewrite=%d skip=%s",
+        len(paragraphs), rewrite_count, skip_counts,
+    )
 
     report = ProcessReport(total_paragraphs=len(paragraphs))
     for c in classifications:
@@ -62,10 +78,19 @@ def process_document(
                     "reason": result.reject_reason,
                     "error": result.error_message,
                 })
+                logger.warning(
+                    "paragraph #%d failed: reason=%s preview=%r error=%s",
+                    idx, result.reject_reason, para.text[:40], result.error_message,
+                )
             completed += 1
             if progress:
                 progress(completed, len(tasks))
 
+    elapsed = time.time() - start_time
+    logger.info(
+        "rewriting complete: rewritten=%d failed=%d elapsed=%.1fs",
+        report.rewritten, len(report.api_failures), elapsed,
+    )
     doc.save(str(output_path))
     return report
 

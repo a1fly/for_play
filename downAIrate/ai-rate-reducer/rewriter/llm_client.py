@@ -6,6 +6,10 @@ import re
 
 from .prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 RejectReason = Literal[
     "empty", "length_drift", "low_chinese", "refusal_prefix",
     "citation_count_changed", "digits_dropped", "api_error",
@@ -89,12 +93,23 @@ def rewrite_paragraph(
     for attempt in range(max_retries):
         try:
             response = qwen_call(SYSTEM_PROMPT, user)
-            return _validate(text, response)
+            result = _validate(text, response)
+            if not result.success:
+                logger.info(
+                    "rewrite rejected: reason=%s original_preview=%r",
+                    result.reject_reason, text[:40],
+                )
+            return result
         except Exception as exc:
             last_error = str(exc)
             if attempt < max_retries - 1:
+                logger.warning(
+                    "LLM call failed (attempt %d/%d): %s — retrying in %.1fs",
+                    attempt + 1, max_retries, last_error, retry_backoff[attempt],
+                )
                 time.sleep(retry_backoff[attempt])
 
+    logger.error("LLM call failed after %d attempts: %s", max_retries, last_error)
     return RewriteResult(success=False, reject_reason="api_error", error_message=last_error)
 
 

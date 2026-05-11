@@ -14,6 +14,12 @@ TMP_DIR = APP_ROOT / "tmp"
 TMP_DIR.mkdir(exist_ok=True)
 STATIC_DIR = APP_ROOT / "static"
 
+import logging
+from rewriter.logging_setup import setup_logging
+
+setup_logging(log_dir=Path(__file__).parent.resolve() / "tmp")
+logger = logging.getLogger(__name__)
+
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
@@ -86,6 +92,9 @@ def upload():
             "error": None,
         }
 
+    logger.info(
+        "upload: task_id=%s file=%r size=%d bytes", task_id, safe_name, input_path.stat().st_size
+    )
     return jsonify({"task_id": task_id})
 
 
@@ -114,6 +123,7 @@ def process(task_id):
     progress_queue: queue.Queue = queue.Queue()
 
     def worker():
+        logger.info("process start: task_id=%s input=%s", task_id, task["input_path"])
         try:
             with _TASKS_LOCK:
                 task["status"] = "processing"
@@ -143,7 +153,15 @@ def process(task_id):
                     "report": task["report"],
                 },
             ))
+            logger.info(
+                "process done: task_id=%s rewritten=%d skipped=%d failed=%d",
+                task_id,
+                report.rewritten,
+                sum(report.skipped_by_reason.values()),
+                len(report.api_failures),
+            )
         except Exception as exc:
+            logger.exception("process failed: task_id=%s", task_id)
             with _TASKS_LOCK:
                 task["status"] = "error"
                 task["error"] = str(exc)
