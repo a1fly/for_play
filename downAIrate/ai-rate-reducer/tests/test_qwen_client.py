@@ -128,3 +128,41 @@ def test_default_qwen_call_raises_on_error(monkeypatch):
     import pytest
     with pytest.raises(RuntimeError, match="429"):
         qwen_client._default_qwen_call("s", "u")
+
+
+def test_retry_succeeds_after_transient_failures(monkeypatch):
+    from rewriter import qwen_client
+
+    # Avoid real sleeps in tests
+    monkeypatch.setattr(qwen_client.time, "sleep", lambda s: None)
+
+    calls = {"n": 0}
+
+    def flaky(system, user):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("transient")
+        return "成功改写后的段落正文，长度合适。"
+
+    result = qwen_client.rewrite_paragraph(
+        "原文段落，长度合适用于测试。",
+        qwen_call=flaky,
+    )
+    assert result.success is True
+    assert calls["n"] == 3
+
+
+def test_retry_gives_up_after_max_attempts(monkeypatch):
+    from rewriter import qwen_client
+    monkeypatch.setattr(qwen_client.time, "sleep", lambda s: None)
+
+    def always_fail(system, user):
+        raise RuntimeError("permanent")
+
+    result = qwen_client.rewrite_paragraph(
+        "原文段落，长度合适用于测试。",
+        qwen_call=always_fail,
+    )
+    assert result.success is False
+    assert result.reject_reason == "api_error"
+    assert "permanent" in (result.error_message or "")
