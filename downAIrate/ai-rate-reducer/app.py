@@ -83,5 +83,98 @@ def upload():
     return jsonify({"task_id": task_id})
 
 
+import json
+import queue
+import threading
+
+from flask import Response, stream_with_context
+
+from rewriter.processor import process_document
+
+
+def _sse_format(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@app.route("/api/process/<task_id>", methods=["GET"])
+def process(task_id):
+    with _TASKS_LOCK:
+        task = _TASKS.get(task_id)
+    if not task:
+        return jsonify({"error": "unknown task_id"}), 404
+    if task["status"] not in ("uploaded", "error"):
+        return jsonify({"error": "task already processing or done"}), 400
+
+    progress_queue: queue.Queue = queue.Queue()
+
+    def worker():
+        try:
+            with _TASKS_LOCK:
+                task["status"] = "processing"
+
+            def on_progress(done, total):
+                progress_queue.put(("progress", {"done": done, "total": total}))
+
+            report = process_document(
+                task["input_path"],
+                task["output_path"],
+                progress=on_progress,
+            )
+
+            with _TASKS_LOCK:
+                task["status"] = "done"
+                task["report"] = {
+                    "total_paragraphs": report.total_paragraphs,
+                    "rewritten": report.rewritten,
+                    "skipped_by_reason": report.skipped_by_reason,
+                    "api_failures": report.api_failures,
+                }
+
+            progress_queue.put((
+                "done",
+                {
+                    "download_url": f"/api/download/{task_id}",
+                    "report": task["report"],
+                },
+            ))
+        except Exception as exc:
+            with _TASKS_LOCK:
+                task["status"] = "error"
+                task["error"] = str(exc)
+            progress_queue.put(("error", {"message": str(exc)}))
+        finally:
+            progress_queue.put(("__END__", None))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    @stream_with_context
+    def stream():
+        while True:
+            event, data = progress_queue.get()
+            if event == "__END__":
+                return
+            yield _sse_format(event, data)
+
+    return Response(stream(), mimetype="text/event-stream")
+
+
+@app.route("/api/download/<task_id>", methods=["GET"])
+def download(task_id):
+    with _TASKS_LOCK:
+        task = _TASKS.get(task_id)
+    if not task or task["status"] != "done":
+        abort(404)
+    output = Path(task["output_path"])
+    if not output.exists():
+        abort(404)
+    download_name = output.name.split("_", 1)[1]
+    return send_from_directory(
+        str(output.parent),
+        output.name,
+        as_attachment=True,
+        download_name=download_name,
+    )
+
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
