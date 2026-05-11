@@ -117,8 +117,8 @@ def test_progress_callback_handles_multiple_paragraphs(tmp_path):
 def test_api_failure_keeps_original_text_and_records_failure(
     sample_docx_single_run_para, tmp_path, monkeypatch
 ):
-    from rewriter import qwen_client
-    monkeypatch.setattr(qwen_client.time, "sleep", lambda s: None)
+    from rewriter import llm_client
+    monkeypatch.setattr(llm_client.time, "sleep", lambda s: None)
 
     output = tmp_path / "out.docx"
 

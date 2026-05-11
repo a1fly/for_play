@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal, Callable
+import os
 import time
 import re
 
@@ -19,31 +20,7 @@ class RewriteResult:
     error_message: str | None = None
 
 
-QwenCallable = Callable[[str, str], str]
-
-
-def rewrite_paragraph(
-    text: str,
-    qwen_call: QwenCallable | None = None,
-    max_retries: int = 3,
-    retry_backoff: tuple[float, ...] = (1.0, 3.0, 9.0),
-) -> RewriteResult:
-    if qwen_call is None:
-        qwen_call = _default_qwen_call
-
-    user = USER_PROMPT_TEMPLATE.format(paragraph=text)
-
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            response = qwen_call(SYSTEM_PROMPT, user)
-            return _validate(text, response)
-        except Exception as exc:
-            last_error = str(exc)
-            if attempt < max_retries - 1:
-                time.sleep(retry_backoff[attempt])
-
-    return RewriteResult(success=False, reject_reason="api_error", error_message=last_error)
+LLMCallable = Callable[[str, str], str]
 
 
 def _chinese_count(text: str) -> int:
@@ -51,7 +28,6 @@ def _chinese_count(text: str) -> int:
 
 
 def _digit_token_count(text: str) -> int:
-    """Count distinct digit runs (e.g. '2024' is one token, '95.3' is one)."""
     return len(re.findall(r"\d+(?:\.\d+)?", text))
 
 
@@ -92,21 +68,62 @@ def _validate(original: str, response: str) -> RewriteResult:
     return RewriteResult(success=True, text=text)
 
 
-def _default_qwen_call(system: str, user: str) -> str:
-    """Call dashscope's Qwen Generation API and return the text content."""
-    import dashscope  # local import: keeps tests independent of SDK import
+def rewrite_paragraph(
+    text: str,
+    qwen_call: LLMCallable | None = None,
+    max_retries: int = 3,
+    retry_backoff: tuple[float, ...] = (1.0, 3.0, 9.0),
+) -> RewriteResult:
+    """Rewrite one paragraph.
 
-    response = dashscope.Generation.call(
-        model="qwen-plus",
+    `qwen_call` keyword is kept for backward compatibility with existing
+    tests and callers; semantically it is any (system, user) -> str
+    function. Defaults to the OpenAI-compatible adapter.
+    """
+    if qwen_call is None:
+        qwen_call = _default_llm_call
+
+    user = USER_PROMPT_TEMPLATE.format(paragraph=text)
+
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = qwen_call(SYSTEM_PROMPT, user)
+            return _validate(text, response)
+        except Exception as exc:
+            last_error = str(exc)
+            if attempt < max_retries - 1:
+                time.sleep(retry_backoff[attempt])
+
+    return RewriteResult(success=False, reject_reason="api_error", error_message=last_error)
+
+
+def _default_llm_call(system: str, user: str) -> str:
+    """Call an OpenAI-compatible chat-completions endpoint.
+
+    Reads LLM_BASE_URL, LLM_API_KEY, LLM_MODEL from environment.
+    Compatible with Qwen (dashscope compat mode), DeepSeek, OpenAI,
+    GLM, Moonshot, Ollama, etc.
+    """
+    from openai import OpenAI
+
+    base_url = os.environ.get("LLM_BASE_URL")
+    api_key = os.environ.get("LLM_API_KEY")
+    model = os.environ.get("LLM_MODEL")
+
+    if not base_url or not api_key or not model:
+        raise RuntimeError(
+            "LLM_BASE_URL / LLM_API_KEY / LLM_MODEL environment variables required"
+        )
+
+    client = OpenAI(base_url=base_url, api_key=api_key)
+    response = client.chat.completions.create(
+        model=model,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
         temperature=0.9,
         top_p=0.95,
-        result_format="message",
     )
-    if response.status_code != 200:
-        msg = getattr(response, "message", "unknown error")
-        raise RuntimeError(f"Qwen API returned {response.status_code}: {msg}")
-    return response.output.choices[0].message.content
+    return response.choices[0].message.content or ""

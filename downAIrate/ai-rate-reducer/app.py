@@ -57,8 +57,14 @@ def upload():
             {"error": "请上传 .docx 文件（请先在 Word 中把 .doc 另存为 .docx）"}
         ), 400
 
-    if not os.environ.get("DASHSCOPE_API_KEY"):
-        return jsonify({"error": "服务器未配置 DASHSCOPE_API_KEY 环境变量"}), 500
+    missing = [
+        var for var in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
+        if not os.environ.get(var)
+    ]
+    if missing:
+        return jsonify({
+            "error": f"服务器未配置环境变量：{', '.join(missing)}（请检查 .env）"
+        }), 500
 
     task_id = uuid.uuid4().hex
     safe_name = Path(f.filename).name

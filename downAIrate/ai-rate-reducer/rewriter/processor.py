@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from docx import Document
 
 from .classifier import Classifier, Classification
-from .qwen_client import rewrite_paragraph, RewriteResult, QwenCallable
+from .llm_client import rewrite_paragraph, RewriteResult, LLMCallable
 
 
 @dataclass
@@ -23,7 +23,7 @@ ProgressCallback = Callable[[int, int], None]
 def process_document(
     input_path: Path,
     output_path: Path,
-    qwen_call: QwenCallable | None = None,
+    qwen_call: LLMCallable | None = None,
     max_workers: int = 5,
     progress: ProgressCallback | None = None,
 ) -> ProcessReport:

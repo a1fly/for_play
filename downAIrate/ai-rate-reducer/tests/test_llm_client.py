@@ -1,4 +1,4 @@
-from rewriter.qwen_client import rewrite_paragraph, RewriteResult
+from rewriter.llm_client import rewrite_paragraph, RewriteResult
 
 
 def test_rewrite_success_with_mock():
@@ -15,10 +15,7 @@ def test_rewrite_success_with_mock():
 
 
 def test_reject_empty_response():
-    result = rewrite_paragraph(
-        "原文段落，长度足够触发改写规则的正文文字。",
-        qwen_call=lambda s, u: "   ",
-    )
+    result = rewrite_paragraph("原文段落，长度足够触发改写规则的正文文字。", qwen_call=lambda s, u: "   ")
     assert result.success is False
     assert result.reject_reason == "empty"
 
@@ -71,70 +68,71 @@ def test_reject_low_chinese_ratio():
     assert result.reject_reason == "low_chinese"
 
 
-def test_default_qwen_call_extracts_text(monkeypatch):
-    from rewriter import qwen_client
+def test_default_llm_call_uses_env_vars_and_extracts_text(monkeypatch):
+    """The OpenAI-compatible adapter should read base_url/api_key/model from
+    env and forward them to openai.OpenAI(...).chat.completions.create."""
+    from rewriter import llm_client
 
-    class FakeMessage:
-        def __init__(self, content):
-            self.content = content
-
-    class FakeChoice:
-        def __init__(self, content):
-            self.message = FakeMessage(content)
-
-    class FakeOutput:
-        def __init__(self, content):
-            self.choices = [FakeChoice(content)]
-
-    class FakeResponse:
-        status_code = 200
-
-        def __init__(self, content):
-            self.output = FakeOutput(content)
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.com/v1")
+    monkeypatch.setenv("LLM_API_KEY", "sk-test")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
 
     captured = {}
 
-    def fake_call(**kwargs):
-        captured.update(kwargs)
-        return FakeResponse("改写后的文本")
+    class FakeMessage:
+        content = "改写后的文本"
 
-    import dashscope
-    monkeypatch.setattr(dashscope.Generation, "call", fake_call)
-
-    out = qwen_client._default_qwen_call("sys prompt", "user prompt")
-    assert out == "改写后的文本"
-    assert captured["model"] == "qwen-plus"
-    assert captured["temperature"] == 0.9
-    assert captured["top_p"] == 0.95
-    msgs = captured["messages"]
-    assert msgs[0]["role"] == "system"
-    assert msgs[0]["content"] == "sys prompt"
-    assert msgs[1]["role"] == "user"
-    assert msgs[1]["content"] == "user prompt"
-
-
-def test_default_qwen_call_raises_on_error(monkeypatch):
-    from rewriter import qwen_client
+    class FakeChoice:
+        message = FakeMessage()
 
     class FakeResponse:
-        status_code = 429
-        message = "rate limited"
+        choices = [FakeChoice()]
 
-    import dashscope
-    monkeypatch.setattr(
-        dashscope.Generation, "call", lambda **kw: FakeResponse()
-    )
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return FakeResponse()
 
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, base_url=None, api_key=None):
+            captured["base_url"] = base_url
+            captured["api_key"] = api_key
+            self.chat = FakeChat()
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    out = llm_client._default_llm_call("sys prompt", "user prompt")
+    assert out == "改写后的文本"
+    assert captured["base_url"] == "https://example.com/v1"
+    assert captured["api_key"] == "sk-test"
+    kw = captured["kwargs"]
+    assert kw["model"] == "test-model"
+    assert kw["temperature"] == 0.9
+    assert kw["top_p"] == 0.95
+    msgs = kw["messages"]
+    assert msgs[0] == {"role": "system", "content": "sys prompt"}
+    assert msgs[1] == {"role": "user", "content": "user prompt"}
+
+
+def test_default_llm_call_raises_when_env_missing(monkeypatch):
+    from rewriter import llm_client
     import pytest
-    with pytest.raises(RuntimeError, match="429"):
-        qwen_client._default_qwen_call("s", "u")
+
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+
+    with pytest.raises(RuntimeError, match="LLM_"):
+        llm_client._default_llm_call("s", "u")
 
 
 def test_retry_succeeds_after_transient_failures(monkeypatch):
-    from rewriter import qwen_client
-
-    # Avoid real sleeps in tests
-    monkeypatch.setattr(qwen_client.time, "sleep", lambda s: None)
+    from rewriter import llm_client
+    monkeypatch.setattr(llm_client.time, "sleep", lambda s: None)
 
     calls = {"n": 0}
 
@@ -144,24 +142,22 @@ def test_retry_succeeds_after_transient_failures(monkeypatch):
             raise RuntimeError("transient")
         return "成功改写后的段落正文，长度合适。"
 
-    result = qwen_client.rewrite_paragraph(
-        "原文段落，长度合适用于测试。",
-        qwen_call=flaky,
+    result = llm_client.rewrite_paragraph(
+        "原文段落，长度合适用于测试。", qwen_call=flaky,
     )
     assert result.success is True
     assert calls["n"] == 3
 
 
 def test_retry_gives_up_after_max_attempts(monkeypatch):
-    from rewriter import qwen_client
-    monkeypatch.setattr(qwen_client.time, "sleep", lambda s: None)
+    from rewriter import llm_client
+    monkeypatch.setattr(llm_client.time, "sleep", lambda s: None)
 
     def always_fail(system, user):
         raise RuntimeError("permanent")
 
-    result = qwen_client.rewrite_paragraph(
-        "原文段落，长度合适用于测试。",
-        qwen_call=always_fail,
+    result = llm_client.rewrite_paragraph(
+        "原文段落，长度合适用于测试。", qwen_call=always_fail,
     )
     assert result.success is False
     assert result.reject_reason == "api_error"
