@@ -35,8 +35,31 @@ class Classifier:
         self._in_references_zone = False
 
     def classify(self, paragraph) -> Classification:
+        import re
+
         style_name = (paragraph.style.name or "").lower()
+        text = paragraph.text.strip()
+
+        # Rule 1: heading
         heading_keywords = ["heading", "title", "toc", "标题", "目录"]
         if any(kw in style_name for kw in heading_keywords):
             return Classification(rewrite=False, skip_reason="heading")
+
+        # Rule 2: special styles (caption / bibliography / quote)
+        special_keywords = ["caption", "题注", "bibliography", "参考文献", "quote", "引文"]
+        if any(kw in style_name for kw in special_keywords):
+            return Classification(rewrite=False, skip_reason="special_style")
+
+        # Rule 3: caption prefix (check first 20 chars)
+        head = text[:20]
+        caption_patterns = [
+            r"^图\s*\d+",
+            r"^表\s*\d+",
+            r"^Figure\s*\d+",
+            r"^Table\s*\d+",
+        ]
+        for pat in caption_patterns:
+            if re.match(pat, head):
+                return Classification(rewrite=False, skip_reason="caption_prefix")
+
         return Classification(rewrite=True)
