@@ -55,3 +55,15 @@ def test_paragraph_after_references_heading_is_skipped(sample_docx):
     last_result = results[-1]
     assert "参考文献区之后" in last_text_para.text
     assert last_result == Classification(rewrite=False, skip_reason="after_references")
+
+
+def test_pure_english_paragraph_is_skipped(sample_docx):
+    doc = Document(str(sample_docx))
+    classifier = Classifier()
+    for p in doc.paragraphs:
+        if "pure English" in p.text:
+            result = classifier.classify(p)
+            assert result.rewrite is False
+            assert result.skip_reason in ("no_chinese", "low_chinese_ratio")
+            return
+    raise AssertionError("pure English paragraph not found")

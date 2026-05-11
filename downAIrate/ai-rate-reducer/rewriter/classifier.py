@@ -23,6 +23,23 @@ class Classification:
     skip_reason: SkipReason | None = None
 
 
+def _chinese_ratio(text: str) -> float:
+    """Fraction of CJK chars in text. Returns 0.0 for empty string."""
+    if not text:
+        return 0.0
+    cjk = sum(1 for ch in text if "一" <= ch <= "鿿")
+    return cjk / len(text)
+
+
+def _has_math_or_object(paragraph) -> bool:
+    """Detect OMML or embedded objects by scanning paragraph XML."""
+    try:
+        xml = paragraph._element.xml
+    except AttributeError:
+        return False
+    return "<m:oMath" in xml or "<w:object" in xml
+
+
 class Classifier:
     """Stateful paragraph classifier.
 
@@ -55,6 +72,16 @@ class Classifier:
             if re.match(r"^\[\d+\]", text):
                 return Classification(rewrite=False, skip_reason="reference_entry")
             return Classification(rewrite=False, skip_reason="after_references")
+
+        # Rule 5: math / code / low Chinese ratio
+        if _has_math_or_object(paragraph):
+            return Classification(rewrite=False, skip_reason="math_object")
+        if "code" in style_name or "代码" in style_name:
+            return Classification(rewrite=False, skip_reason="code_style")
+        if not text or all(not ("一" <= ch <= "鿿") for ch in text):
+            return Classification(rewrite=False, skip_reason="no_chinese")
+        if _chinese_ratio(text) < 0.20:
+            return Classification(rewrite=False, skip_reason="low_chinese_ratio")
 
         # Rule 2: special styles
         special_keywords = ["caption", "题注", "bibliography", "参考文献", "quote", "引文"]
