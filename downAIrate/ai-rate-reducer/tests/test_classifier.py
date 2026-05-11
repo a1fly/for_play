@@ -30,3 +30,28 @@ def test_table_caption_is_skipped(sample_docx):
             assert result == Classification(rewrite=False, skip_reason="caption_prefix")
             return
     raise AssertionError("table caption not found in fixture")
+
+
+def test_reference_entry_starting_with_bracket_is_skipped(sample_docx):
+    doc = Document(str(sample_docx))
+    classifier = Classifier()
+    # Need to feed all paragraphs in order so the references flag triggers
+    results = [classifier.classify(p) for p in doc.paragraphs]
+    # Find the [1] paragraph
+    for p, result in zip(doc.paragraphs, results):
+        if p.text.startswith("[1]"):
+            assert result.rewrite is False
+            assert result.skip_reason in ("reference_entry", "after_references")
+            return
+    raise AssertionError("reference entry not found")
+
+
+def test_paragraph_after_references_heading_is_skipped(sample_docx):
+    doc = Document(str(sample_docx))
+    classifier = Classifier()
+    results = [classifier.classify(p) for p in doc.paragraphs]
+    # Last paragraph in fixture is normal-looking body text AFTER references heading
+    last_text_para = doc.paragraphs[-1]
+    last_result = results[-1]
+    assert "参考文献区之后" in last_text_para.text
+    assert last_result == Classification(rewrite=False, skip_reason="after_references")
