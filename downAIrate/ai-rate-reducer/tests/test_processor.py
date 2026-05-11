@@ -112,3 +112,28 @@ def test_progress_callback_handles_multiple_paragraphs(tmp_path):
     assert len(events) == 3
     assert all(total == 3 for _, total in events)
     assert [done for done, _ in events] == [1, 2, 3]
+
+
+def test_api_failure_keeps_original_text_and_records_failure(
+    sample_docx_single_run_para, tmp_path, monkeypatch
+):
+    from rewriter import qwen_client
+    monkeypatch.setattr(qwen_client.time, "sleep", lambda s: None)
+
+    output = tmp_path / "out.docx"
+
+    def always_fail(system, user):
+        raise RuntimeError("simulated API outage")
+
+    report = process_document(
+        sample_docx_single_run_para,
+        output,
+        qwen_call=always_fail,
+    )
+
+    assert report.rewritten == 0
+    assert len(report.api_failures) == 1
+    assert report.api_failures[0]["reason"] == "api_error"
+
+    out_doc = Document(str(output))
+    assert out_doc.paragraphs[0].text.startswith("这是一段需要被改写的正文文字")
