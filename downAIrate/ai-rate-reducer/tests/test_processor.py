@@ -73,3 +73,42 @@ def test_report_records_skip_reasons_and_rewrite_count(sample_docx, tmp_path):
     assert "mixed_format" in report.skipped_by_reason
     assert "too_short" in report.skipped_by_reason
     assert "no_chinese" in report.skipped_by_reason
+
+
+def test_progress_callback_invoked_with_completion_counts(
+    sample_docx_single_run_para, tmp_path
+):
+    output = tmp_path / "out.docx"
+    events = []
+
+    process_document(
+        sample_docx_single_run_para,
+        output,
+        qwen_call=lambda s, u: "改写后的段落文字，长度适当。",
+        progress=lambda done, total: events.append((done, total)),
+    )
+
+    assert events == [(1, 1)]
+
+
+def test_progress_callback_handles_multiple_paragraphs(tmp_path):
+    doc = Document()
+    for i in range(3):
+        doc.add_paragraph(f"这是第{i}段需要改写的正文，长度足够触发改写规则。")
+    src = tmp_path / "three.docx"
+    doc.save(str(src))
+
+    output = tmp_path / "out.docx"
+    events = []
+
+    process_document(
+        src,
+        output,
+        qwen_call=lambda s, u: "改写后段落，长度合适并不漂移。",
+        max_workers=2,
+        progress=lambda done, total: events.append((done, total)),
+    )
+
+    assert len(events) == 3
+    assert all(total == 3 for _, total in events)
+    assert [done for done, _ in events] == [1, 2, 3]
